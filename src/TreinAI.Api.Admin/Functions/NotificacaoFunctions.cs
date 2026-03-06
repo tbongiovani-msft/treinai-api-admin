@@ -58,11 +58,11 @@ public class NotificacaoFunctions
     }
 
     /// <summary>
-    /// PATCH /api/notificacoes/{id}/lida — Mark notification as read.
+    /// PUT|PATCH /api/notificacoes/{id}/lida — Mark notification as read.
     /// </summary>
     [Function("MarcarNotificacaoLida")]
     public async Task<HttpResponseData> MarcarLida(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "notificacoes/{id}/lida")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", "put", Route = "notificacoes/{id}/lida")] HttpRequestData req,
         string id)
     {
         var notificacao = await _repository.GetByIdAsync(id, _tenantContext.TenantId);
@@ -78,6 +78,29 @@ public class NotificacaoFunctions
 
         var updated = await _repository.UpdateAsync(notificacao);
         return await ValidationHelper.OkAsync(req, updated);
+    }
+
+    /// <summary>
+    /// PUT /api/notificacoes/lidas — Mark all notifications as read for the current user.
+    /// </summary>
+    [Function("MarcarTodasNotificacoesLidas")]
+    public async Task<HttpResponseData> MarcarTodasLidas(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "notificacoes/lidas")] HttpRequestData req)
+    {
+        var naoLidas = await _repository.QueryAsync(
+            _tenantContext.TenantId,
+            n => n.UserId == _tenantContext.UserId && !n.Lida);
+
+        foreach (var notificacao in naoLidas)
+        {
+            notificacao.Lida = true;
+            notificacao.LidaEm = DateTime.UtcNow;
+            notificacao.UpdatedBy = _tenantContext.UserId;
+            await _repository.UpdateAsync(notificacao);
+        }
+
+        _logger.LogInformation("Marked {Count} notifications as read for user {UserId}", naoLidas.Count, _tenantContext.UserId);
+        return await ValidationHelper.OkAsync(req, new { marcadas = naoLidas.Count });
     }
 
     /// <summary>
