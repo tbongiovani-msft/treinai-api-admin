@@ -32,7 +32,7 @@ public class UsuarioFunctions
 
     [Function("GetUsuarios")]
     public async Task<HttpResponseData> GetUsuarios(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "admin/usuarios")] HttpRequestData req)
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "usuarios")] HttpRequestData req)
     {
         if (!_tenantContext.IsAdmin)
             throw new ForbiddenException("Apenas administradores podem gerenciar usuários.");
@@ -43,7 +43,7 @@ public class UsuarioFunctions
 
     [Function("GetUsuarioById")]
     public async Task<HttpResponseData> GetUsuarioById(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "admin/usuarios/{id}")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "usuarios/{id}")] HttpRequestData req,
         string id)
     {
         if (!_tenantContext.IsAdmin && _tenantContext.UserId != id)
@@ -76,7 +76,7 @@ public class UsuarioFunctions
 
     [Function("UpdateUsuarioRole")]
     public async Task<HttpResponseData> UpdateRole(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "admin/usuarios/{id}/role")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "usuarios/{id}/role")] HttpRequestData req,
         string id)
     {
         if (!_tenantContext.IsAdmin)
@@ -101,13 +101,13 @@ public class UsuarioFunctions
     }
 
     /// <summary>
-    /// GET /api/admin/usuarios/pendentes — Lists newly registered users (last 48h) pending admin review.
+    /// GET /api/usuarios/pendentes — Lists newly registered users (last 48h) pending admin review.
     /// Returns users with role "aluno" created in the last 48 hours, ordered by most recent first.
     /// Supports ?horas= query param to override the 48h default window.
     /// </summary>
     [Function("GetUsuariosPendentes")]
     public async Task<HttpResponseData> GetUsuariosPendentes(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "admin/usuarios/pendentes")] HttpRequestData req)
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "usuarios/pendentes")] HttpRequestData req)
     {
         if (!_tenantContext.IsAdmin)
             throw new ForbiddenException("Apenas administradores podem visualizar cadastros pendentes.");

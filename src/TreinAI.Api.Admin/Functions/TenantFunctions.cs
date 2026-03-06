@@ -31,7 +31,7 @@ public class TenantFunctions
 
     [Function("GetTenants")]
     public async Task<HttpResponseData> GetTenants(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "admin/tenants")] HttpRequestData req)
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "tenants")] HttpRequestData req)
     {
         if (!_tenantContext.IsAdmin)
             throw new ForbiddenException("Apenas administradores podem gerenciar tenants.");
@@ -42,7 +42,7 @@ public class TenantFunctions
 
     [Function("GetTenantById")]
     public async Task<HttpResponseData> GetTenantById(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "admin/tenants/{id}")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "tenants/{id}")] HttpRequestData req,
         string id)
     {
         if (!_tenantContext.IsAdmin)

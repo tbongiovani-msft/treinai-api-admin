@@ -142,7 +142,7 @@ public class AuthFunctions
                 Titulo = "Novo cadastro",
                 Mensagem = $"{newUser.Nome} ({newUser.Email}) se cadastrou no sistema e está aguardando revisão.",
                 Tipo = "novo_cadastro",
-                LinkUrl = $"/admin/usuarios/{newUser.Id}",
+                LinkUrl = $"/usuarios/{newUser.Id}",
                 Lida = false,
                 CreatedBy = "system"
             };
