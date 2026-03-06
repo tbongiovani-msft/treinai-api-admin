@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "TreinAI.Api.Admin": {
+      "commandName": "Project",
+      "commandLineArgs": "--port 7075",
+      "launchBrowser": false
+    }
+  }
+}
