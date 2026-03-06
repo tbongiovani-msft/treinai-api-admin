@@ -22,6 +22,7 @@ var host = new HostBuilder()
             ?? "treinai-db";
 
         services.AddTreinAIShared(cosmosEndpoint, databaseName);
+        services.AddEmailService();
         services.AddRepository<Tenant>("tenants");
         services.AddRepository<Usuario>("usuarios");
         services.AddRepository<Notificacao>("notificacoes");

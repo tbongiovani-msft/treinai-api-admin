@@ -99,6 +99,43 @@ public class UsuarioFunctions
         var updated = await _repository.UpdateAsync(existing);
         return await ValidationHelper.OkAsync(req, updated);
     }
+
+    /// <summary>
+    /// GET /api/admin/usuarios/pendentes — Lists newly registered users (last 48h) pending admin review.
+    /// Returns users with role "aluno" created in the last 48 hours, ordered by most recent first.
+    /// Supports ?horas= query param to override the 48h default window.
+    /// </summary>
+    [Function("GetUsuariosPendentes")]
+    public async Task<HttpResponseData> GetUsuariosPendentes(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "admin/usuarios/pendentes")] HttpRequestData req)
+    {
+        if (!_tenantContext.IsAdmin)
+            throw new ForbiddenException("Apenas administradores podem visualizar cadastros pendentes.");
+
+        var queryParams = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+        var horasStr = queryParams["horas"];
+        var horas = 48;
+
+        if (!string.IsNullOrEmpty(horasStr) && int.TryParse(horasStr, out var horasParam) && horasParam > 0)
+            horas = horasParam;
+
+        var limite = DateTime.UtcNow.AddHours(-horas);
+
+        _logger.LogInformation(
+            "Getting pending users for last {Horas}h in tenant {TenantId}",
+            horas, _tenantContext.TenantId);
+
+        var pendentes = await _repository.QueryAsync(
+            _tenantContext.TenantId,
+            u => u.DataCadastro >= limite && !u.IsDeleted);
+
+        // Order by most recent first
+        var resultado = pendentes
+            .OrderByDescending(u => u.DataCadastro)
+            .ToList();
+
+        return await ValidationHelper.OkAsync(req, resultado);
+    }
 }
 
 internal class RoleUpdateDto
