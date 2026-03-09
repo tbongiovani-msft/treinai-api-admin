@@ -40,9 +40,10 @@ public class AuthFunctions
     }
 
     /// <summary>
-    /// POST /api/auth/register — Self-registration.
-    /// Creates a new user with default role "aluno" and sends email notification to admin.
-    /// Also creates an in-app notification for the admin.
+    /// POST /api/auth/register — Self-registration with email and password.
+    /// If the email already exists but has no password (migrated from B2C/mock),
+    /// sets the password and returns the existing user.
+    /// Otherwise creates a new user with default role "aluno".
     /// </summary>
     [Function("AuthRegister")]
     public async Task<HttpResponseData> Register(
@@ -52,27 +53,46 @@ public class AuthFunctions
         var dto = await ValidationHelper.ValidateRequestAsync(req, validator);
 
         var tenantId = dto.TenantId ?? _tenantContext.TenantId;
+        var email = dto.Email.Trim().ToLowerInvariant();
 
         // Check if user already exists by email
         var existing = await _usuarioRepository.QueryAsync(
             tenantId,
-            u => u.Email == dto.Email && !u.IsDeleted);
+            u => u.Email == email && !u.IsDeleted);
 
         if (existing.Count > 0)
+        {
+            var existingUser = existing[0];
+
+            // Migration path: user existed (from B2C/mock) but has no password → set it
+            if (string.IsNullOrEmpty(existingUser.PasswordHash))
+            {
+                _logger.LogInformation(
+                    "Setting password for existing user {Email} (migration from B2C/mock)",
+                    email);
+                existingUser.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Senha);
+                existingUser.Nome = dto.Nome; // allow name update
+                existingUser.UpdatedBy = existingUser.Id;
+                var updated = await _usuarioRepository.UpdateAsync(existingUser);
+                updated.PasswordHash = null; // Don't expose hash in response
+                return await ValidationHelper.OkAsync(req, updated);
+            }
+
             throw new BusinessValidationException("Já existe um usuário cadastrado com este e-mail.");
+        }
 
         // Create user with default role "aluno"
         var usuario = new Usuario
         {
             TenantId = tenantId,
             Nome = dto.Nome,
-            Email = dto.Email,
-            B2CObjectId = dto.B2CObjectId ?? _tenantContext.UserId,
+            Email = email,
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Senha),
             Role = "aluno",
             Ativo = true,
             DataCadastro = DateTime.UtcNow,
-            CreatedBy = dto.B2CObjectId ?? _tenantContext.UserId,
-            UpdatedBy = dto.B2CObjectId ?? _tenantContext.UserId
+            CreatedBy = "self-register",
+            UpdatedBy = "self-register"
         };
 
         _logger.LogInformation(
@@ -97,7 +117,52 @@ public class AuthFunctions
         // Create in-app notification for admin users
         await CreateAdminNotificationAsync(created, tenantId);
 
+        created.PasswordHash = null; // Don't expose hash in response
         return await ValidationHelper.CreatedAsync(req, created);
+    }
+
+    /// <summary>
+    /// POST /api/auth/login — Email/password login.
+    /// Validates credentials and returns the full Usuario object.
+    /// </summary>
+    [Function("AuthLogin")]
+    public async Task<HttpResponseData> Login(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "auth/login")] HttpRequestData req)
+    {
+        var body = await req.ReadFromJsonAsync<LoginDto>();
+
+        if (body == null || string.IsNullOrWhiteSpace(body.Email) || string.IsNullOrWhiteSpace(body.Senha))
+            throw new BusinessValidationException("Email e senha são obrigatórios.");
+
+        var tenantId = body.TenantId ?? _tenantContext.TenantId;
+        if (string.IsNullOrEmpty(tenantId))
+            tenantId = "t-treinai-001";
+
+        var email = body.Email.Trim().ToLowerInvariant();
+
+        var users = await _usuarioRepository.QueryAsync(
+            tenantId,
+            u => u.Email == email && u.Ativo && !u.IsDeleted);
+
+        if (users.Count == 0)
+            throw new BusinessValidationException("Email ou senha incorretos.");
+
+        var user = users[0];
+
+        // Validate password
+        if (string.IsNullOrEmpty(user.PasswordHash))
+        {
+            _logger.LogWarning("Login attempt for user {Email} without password hash (needs registration)", email);
+            throw new BusinessValidationException("Conta sem senha. Acesse 'Criar conta' para definir sua senha.");
+        }
+
+        if (!BCrypt.Net.BCrypt.Verify(body.Senha, user.PasswordHash))
+            throw new BusinessValidationException("Email ou senha incorretos.");
+
+        _logger.LogInformation("Successful login for user {Email} ({UserId})", email, user.Id);
+
+        user.PasswordHash = null; // Don't expose hash in response
+        return await ValidationHelper.OkAsync(req, user);
     }
 
     /// <summary>
