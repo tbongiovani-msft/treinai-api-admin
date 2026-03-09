@@ -129,9 +129,7 @@ public class AuthFunctions
 
         _logger.LogInformation("Mock login for user {Email} in tenant {TenantId}", body.Email, tenantId);
 
-        var response = req.CreateResponse(System.Net.HttpStatusCode.OK);
-        await response.WriteAsJsonAsync(users[0]);
-        return response;
+        return await ValidationHelper.OkAsync(req, users[0]);
     }
 
     private async Task SendAdminNotificationEmailAsync(Usuario newUser)
