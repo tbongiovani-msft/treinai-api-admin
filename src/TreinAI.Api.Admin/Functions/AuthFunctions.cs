@@ -101,35 +101,94 @@ public class AuthFunctions
     }
 
     /// <summary>
-    /// POST /api/auth/login — Mock login by email.
-    /// Finds an existing user by email and returns their profile.
-    /// In production this is replaced by Azure AD B2C authentication.
+    /// POST /api/auth/login-b2c — B2C login / auto-registration.
+    /// Called by the frontend after Azure AD B2C authentication.
+    /// 1. Tries to find user by B2C Object ID
+    /// 2. If not found, tries to find by email (migration from mock → B2C)
+    /// 3. If found by email, links the B2C Object ID
+    /// 4. If not found at all, creates a new user as "aluno" (auto-registration)
+    /// Returns the full Usuario object for the authenticated user.
     /// </summary>
-    [Function("AuthLogin")]
-    public async Task<HttpResponseData> Login(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "auth/login")] HttpRequestData req)
+    [Function("AuthLoginB2C")]
+    public async Task<HttpResponseData> LoginB2C(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "auth/login-b2c")] HttpRequestData req)
     {
-        var body = await req.ReadFromJsonAsync<LoginDto>();
+        var body = await req.ReadFromJsonAsync<LoginB2CDto>();
 
-        if (body == null || string.IsNullOrWhiteSpace(body.Email))
+        if (body == null || string.IsNullOrWhiteSpace(body.B2CObjectId))
+            throw new BusinessValidationException("B2CObjectId é obrigatório.");
+
+        if (string.IsNullOrWhiteSpace(body.Email))
             throw new BusinessValidationException("Email é obrigatório.");
 
         var tenantId = body.TenantId ?? _tenantContext.TenantId;
+        if (string.IsNullOrEmpty(tenantId))
+            tenantId = "t-treinai-001"; // default seed tenant
 
+        // 1. Try to find by B2C Object ID
         var users = await _usuarioRepository.QueryAsync(
             tenantId,
-            u => u.Email == body.Email.Trim().ToLower() && u.Ativo && !u.IsDeleted);
+            u => u.B2CObjectId == body.B2CObjectId && u.Ativo && !u.IsDeleted);
 
-        if (users.Count == 0)
+        if (users.Count > 0)
         {
-            var notFound = req.CreateResponse(System.Net.HttpStatusCode.NotFound);
-            await notFound.WriteAsJsonAsync(new { title = "Usuário não encontrado", detail = "Nenhum usuário ativo encontrado com este e-mail." });
-            return notFound;
+            _logger.LogInformation("B2C login: found user by OID {B2CObjectId} in tenant {TenantId}",
+                body.B2CObjectId, tenantId);
+            return await ValidationHelper.OkAsync(req, users[0]);
         }
 
-        _logger.LogInformation("Mock login for user {Email} in tenant {TenantId}", body.Email, tenantId);
+        // 2. Try to find by email (migration from mock → B2C)
+        var email = body.Email.Trim().ToLowerInvariant();
+        users = await _usuarioRepository.QueryAsync(
+            tenantId,
+            u => u.Email == email && u.Ativo && !u.IsDeleted);
 
-        return await ValidationHelper.OkAsync(req, users[0]);
+        if (users.Count > 0)
+        {
+            var existingUser = users[0];
+            _logger.LogInformation(
+                "B2C login: found user by email {Email}, linking B2C OID {B2CObjectId} (was: {OldOid})",
+                email, body.B2CObjectId, existingUser.B2CObjectId);
+
+            // Link the B2C Object ID to the existing account
+            existingUser.B2CObjectId = body.B2CObjectId;
+            existingUser.UpdatedBy = body.B2CObjectId;
+            var updated = await _usuarioRepository.UpdateAsync(existingUser);
+            return await ValidationHelper.OkAsync(req, updated);
+        }
+
+        // 3. Not found → auto-register as "aluno"
+        var nome = body.Nome ?? email.Split('@')[0];
+        _logger.LogInformation(
+            "B2C login: no user found for OID {B2CObjectId} or email {Email}. Auto-registering as aluno.",
+            body.B2CObjectId, email);
+
+        var newUser = new Usuario
+        {
+            TenantId = tenantId,
+            Nome = nome,
+            Email = email,
+            B2CObjectId = body.B2CObjectId,
+            Role = "aluno",
+            Ativo = true,
+            DataCadastro = DateTime.UtcNow,
+            CreatedBy = body.B2CObjectId,
+            UpdatedBy = body.B2CObjectId
+        };
+
+        var created = await _usuarioRepository.CreateAsync(newUser);
+
+        // Send email notification to admin (fire-and-forget)
+        _ = Task.Run(async () =>
+        {
+            try { await SendAdminNotificationEmailAsync(created); }
+            catch (Exception ex) { _logger.LogError(ex, "Failed to send admin email for user {UserId}", created.Id); }
+        });
+
+        // Create in-app notification for admin users
+        await CreateAdminNotificationAsync(created, tenantId);
+
+        return await ValidationHelper.CreatedAsync(req, created);
     }
 
     private async Task SendAdminNotificationEmailAsync(Usuario newUser)
