@@ -100,6 +100,40 @@ public class AuthFunctions
         return await ValidationHelper.CreatedAsync(req, created);
     }
 
+    /// <summary>
+    /// POST /api/auth/login — Mock login by email.
+    /// Finds an existing user by email and returns their profile.
+    /// In production this is replaced by Azure AD B2C authentication.
+    /// </summary>
+    [Function("AuthLogin")]
+    public async Task<HttpResponseData> Login(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "auth/login")] HttpRequestData req)
+    {
+        var body = await req.ReadFromJsonAsync<LoginDto>();
+
+        if (body == null || string.IsNullOrWhiteSpace(body.Email))
+            throw new BusinessValidationException("Email é obrigatório.");
+
+        var tenantId = body.TenantId ?? _tenantContext.TenantId;
+
+        var users = await _usuarioRepository.QueryAsync(
+            tenantId,
+            u => u.Email == body.Email.Trim().ToLower() && u.Ativo && !u.IsDeleted);
+
+        if (users.Count == 0)
+        {
+            var notFound = req.CreateResponse(System.Net.HttpStatusCode.NotFound);
+            await notFound.WriteAsJsonAsync(new { title = "Usuário não encontrado", detail = "Nenhum usuário ativo encontrado com este e-mail." });
+            return notFound;
+        }
+
+        _logger.LogInformation("Mock login for user {Email} in tenant {TenantId}", body.Email, tenantId);
+
+        var response = req.CreateResponse(System.Net.HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(users[0]);
+        return response;
+    }
+
     private async Task SendAdminNotificationEmailAsync(Usuario newUser)
     {
         var subject = $"[treinAI] Novo cadastro: {newUser.Nome}";
